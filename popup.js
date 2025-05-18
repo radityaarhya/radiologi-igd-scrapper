@@ -335,6 +335,7 @@ document.addEventListener("DOMContentLoaded", function () {
                       // Tambahkan konten detail ke data pasien
                       patient.detailContent = result.detailContent.trim();
                       patient.usiaPasien = result.usiaPasien;
+                      patient.assessmentAwal = result.assessmentAwal;
                       // Gunakan nama dari halaman detail jika tersedia
                       if (result.namaPasien) {
                         patient.namaDetail = result.namaPasien;
@@ -349,7 +350,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     } else {
                       // Tidak ada konten detail, tetap lanjut
                       patient.detailContent = "Tidak ada data detail";
-                      patient.usiaPasien = "Usia tidak diketahui";
+                      patient.usiaPasien = "XX";
+                      patient.assessmentAwal = "";
                       processedCount++;
 
                       setTimeout(() => {
@@ -385,17 +387,23 @@ document.addEventListener("DOMContentLoaded", function () {
       output += `${item.waktu}\n`;
       output += `${item.noRM}\n`;
 
-      // Tambahkan nama dengan usia
+      // Tambahkan nama dengan usia dan assessment awal jika ada
       const namaToUse = item.namaDetail || item.nama;
       const usiaTeks =
-        item.usiaPasien !== undefined &&
-        item.usiaPasien !== "Usia tidak diketahui"
+        item.usiaPasien !== undefined && item.usiaPasien !== "XX"
           ? `/USIA ${item.usiaPasien} TAHUN`
           : "";
-      output += `${namaToUse}${usiaTeks}\n`;
+
+      const assessmentTeks = item.assessmentAwal
+        ? `/${item.assessmentAwal}`
+        : "";
+      output += `${namaToUse}${usiaTeks}${assessmentTeks}\n`;
 
       output += `${item.noPelayanan}\n`;
       output += `http://apps.rsudntb.id/radiologi/order/${item.noPelayanan}/detail\n`;
+
+      // Tambahkan link ZFP
+      output += `http://10.1.1.22/ZFP?mode=proxy&lights=on&titlebar=on#View&ris_exam_id=${item.noPelayanan}&un=pr0vntb&pw=gG5DawEX9GI0A89y14VnuHDYOmR%2fzWYZA4g8FBlWFwEBS%2bXKC6mOXajPnqm44oJv\n`;
 
       // Tambahkan konten detail dalam tanda kutip
       if (item.detailContent) {
@@ -531,9 +539,16 @@ function getDetailContent() {
     // Cari elemen dengan class 'note-editable card-block'
     const detailElement = document.querySelector(".note-editable.card-block");
 
+    // Mengambil assessment awal jika ada
+    const assessmentElement = document.querySelector("#assessment-awal");
+    let assessmentText = "";
+    if (assessmentElement && assessmentElement.value) {
+      assessmentText = assessmentElement.value.trim();
+    }
+
     // Mengambil tanggal lahir pasien dan menghitung usia
     const tanggalLahirElement = document.querySelector("#tgl_lahir_pasien");
-    let usiaPasien = "Usia tidak diketahui";
+    let usiaPasien = "XX";
 
     if (tanggalLahirElement && tanggalLahirElement.value) {
       const tanggalLahirPasien = new Date(tanggalLahirElement.value);
@@ -571,13 +586,15 @@ function getDetailContent() {
       detailContent: detailContent,
       usiaPasien: usiaPasien,
       namaPasien: namaPasien,
+      assessmentAwal: assessmentText,
     };
   } catch (error) {
     console.error("Error pada fungsi getDetailContent:", error);
     return {
       detailContent: "Error saat mengambil konten detail",
-      usiaPasien: "Error",
+      usiaPasien: "XX",
       namaPasien: "",
+      assessmentAwal: "",
     };
   }
 }
