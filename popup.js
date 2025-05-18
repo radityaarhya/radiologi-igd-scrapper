@@ -212,8 +212,14 @@ document.addEventListener("DOMContentLoaded", function () {
                       detailResults[0] &&
                       detailResults[0].result
                     ) {
+                      const result = detailResults[0].result;
                       // Tambahkan konten detail ke data pasien
-                      patient.detailContent = detailResults[0].result.trim();
+                      patient.detailContent = result.detailContent.trim();
+                      patient.usiaPasien = result.usiaPasien;
+                      // Gunakan nama dari halaman detail jika tersedia
+                      if (result.namaPasien) {
+                        patient.namaDetail = result.namaPasien;
+                      }
 
                       processedCount++;
 
@@ -224,6 +230,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     } else {
                       // Tidak ada konten detail, tetap lanjut
                       patient.detailContent = "Tidak ada data detail";
+                      patient.usiaPasien = "Usia tidak diketahui";
                       processedCount++;
 
                       setTimeout(() => {
@@ -258,7 +265,16 @@ document.addEventListener("DOMContentLoaded", function () {
       output += `PASIEN ${paddedIndex}\n`;
       output += `${item.waktu}\n`;
       output += `${item.noRM}\n`;
-      output += `${item.nama}\n`;
+
+      // Tambahkan nama dengan usia
+      const namaToUse = item.namaDetail || item.nama;
+      const usiaTeks =
+        item.usiaPasien !== undefined &&
+        item.usiaPasien !== "Usia tidak diketahui"
+          ? `/USIA ${item.usiaPasien} TAHUN`
+          : "";
+      output += `${namaToUse}${usiaTeks}\n`;
+
       output += `${item.noPelayanan}\n`;
       output += `http://apps.rsudntb.id/radiologi/order/${item.noPelayanan}/detail\n`;
 
@@ -393,14 +409,53 @@ function getDetailContent() {
     // Cari elemen dengan class 'note-editable card-block'
     const detailElement = document.querySelector(".note-editable.card-block");
 
-    if (detailElement) {
-      // Ambil dan bersihkan text content
-      return detailElement.textContent.trim();
+    // Mengambil tanggal lahir pasien dan menghitung usia
+    const tanggalLahirElement = document.querySelector("#tgl_lahir_pasien");
+    let usiaPasien = "Usia tidak diketahui";
+
+    if (tanggalLahirElement && tanggalLahirElement.value) {
+      const tanggalLahirPasien = new Date(tanggalLahirElement.value);
+      const currentDate = new Date();
+
+      // Hitung usia dasar (selisih tahun)
+      let usia = currentDate.getFullYear() - tanggalLahirPasien.getFullYear();
+
+      // Koreksi jika belum ulang tahun tahun ini
+      const birthdayThisYear = new Date(
+        currentDate.getFullYear(),
+        tanggalLahirPasien.getMonth(),
+        tanggalLahirPasien.getDate()
+      );
+
+      if (currentDate < birthdayThisYear) {
+        usia--;
+      }
+
+      usiaPasien = usia;
     }
 
-    return "Konten detail tidak ditemukan";
+    // Ambil nama pasien jika ada
+    const namaPasienElement = document.querySelector("#nama_pasien");
+    const namaPasien = namaPasienElement ? namaPasienElement.value.trim() : "";
+
+    // Ambil data detail
+    let detailContent = "Konten detail tidak ditemukan";
+    if (detailElement) {
+      detailContent = detailElement.textContent.trim();
+    }
+
+    // Kembalikan objek dengan semua informasi yang dibutuhkan
+    return {
+      detailContent: detailContent,
+      usiaPasien: usiaPasien,
+      namaPasien: namaPasien,
+    };
   } catch (error) {
     console.error("Error pada fungsi getDetailContent:", error);
-    return "Error saat mengambil konten detail";
+    return {
+      detailContent: "Error saat mengambil konten detail",
+      usiaPasien: "Error",
+      namaPasien: "",
+    };
   }
 }
