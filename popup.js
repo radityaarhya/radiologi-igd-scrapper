@@ -1,4 +1,3 @@
-// popup.js - Perbaikan untuk masalah pagination
 document.addEventListener("DOMContentLoaded", function () {
   // Set tanggal hari ini sebagai default
   const today = new Date();
@@ -64,7 +63,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
           // Jika hanya ada satu halaman, langsung proses hasilnya
           if (pageInfo.totalPages <= 1) {
-            formatAndDownloadData(allData, tanggal);
+            processDetailPages(allData, tabId, tanggal);
             return;
           }
 
@@ -77,10 +76,10 @@ document.addEventListener("DOMContentLoaded", function () {
           function getNextPageData(currentPage) {
             // Jika sudah semua halaman diproses, format dan download hasilnya
             if (currentPage > pageInfo.totalPages) {
-              // Kembali ke halaman awal
+              // Kembali ke halaman awal dan proses detail
               chrome.tabs.update(tabId, { url: baseUrl }, function () {
                 setTimeout(() => {
-                  formatAndDownloadData(allData, tanggal);
+                  processDetailPages(allData, tabId, tanggal);
                 }, 1000);
               });
               return;
@@ -156,8 +155,8 @@ document.addEventListener("DOMContentLoaded", function () {
     );
   }
 
-  // Fungsi untuk memformat dan mengunduh data
-  function formatAndDownloadData(data, tanggal) {
+  // Fungsi untuk memproses halaman detail setiap pasien
+  function processDetailPages(data, tabId, tanggal) {
     if (!data || data.length === 0) {
       showStatus(
         'Tidak ditemukan data dengan tujuan "Radiologi IGD Terpadu"',
@@ -169,6 +168,89 @@ document.addEventListener("DOMContentLoaded", function () {
     // Urutkan data berdasarkan waktu
     data.sort((a, b) => a.waktu.localeCompare(b.waktu));
 
+    showStatus(
+      `Mengumpulkan data detail untuk ${data.length} pasien...`,
+      "info"
+    );
+
+    // Proses setiap halaman detail pasien secara berurutan
+    let processedCount = 0;
+
+    // Fungsi untuk meproses detail pasien secara rekursif
+    function processNextDetail(index) {
+      if (index >= data.length) {
+        // Selesai memproses semua detail
+        formatAndDownloadData(data, tanggal);
+        return;
+      }
+
+      const patient = data[index];
+      const detailUrl = `http://apps.rsudntb.id/radiologi/order/${patient.noPelayanan}/detail`;
+
+      // Update status
+      showStatus(
+        `Mengumpulkan detail pasien ${index + 1} dari ${data.length}...`,
+        "info"
+      );
+
+      // Buka halaman detail
+      chrome.tabs.update(tabId, { url: detailUrl }, function () {
+        // Tunggu sampai halaman detail dimuat
+        function checkDetailLoaded() {
+          chrome.tabs.get(tabId, function (tab) {
+            if (tab.status === "complete" && tab.url.includes(`/detail`)) {
+              // Halaman sudah dimuat, ambil konten
+              setTimeout(() => {
+                chrome.scripting.executeScript(
+                  {
+                    target: { tabId: tabId },
+                    function: getDetailContent,
+                  },
+                  function (detailResults) {
+                    if (
+                      detailResults &&
+                      detailResults[0] &&
+                      detailResults[0].result
+                    ) {
+                      // Tambahkan konten detail ke data pasien
+                      patient.detailContent = detailResults[0].result.trim();
+
+                      processedCount++;
+
+                      // Lanjut ke pasien berikutnya
+                      setTimeout(() => {
+                        processNextDetail(index + 1);
+                      }, 500);
+                    } else {
+                      // Tidak ada konten detail, tetap lanjut
+                      patient.detailContent = "Tidak ada data detail";
+                      processedCount++;
+
+                      setTimeout(() => {
+                        processNextDetail(index + 1);
+                      }, 500);
+                    }
+                  }
+                );
+              }, 1500);
+            } else {
+              // Cek lagi setelah beberapa saat
+              setTimeout(checkDetailLoaded, 500);
+            }
+          });
+        }
+
+        // Mulai cek loading halaman detail
+        setTimeout(checkDetailLoaded, 1000);
+      });
+    }
+
+    // Mulai dari pasien pertama
+    processNextDetail(0);
+  }
+
+  // Fungsi untuk memformat dan mengunduh data
+  function formatAndDownloadData(data, tanggal) {
     // Format output
     let output = "";
     data.forEach((item, index) => {
@@ -178,7 +260,16 @@ document.addEventListener("DOMContentLoaded", function () {
       output += `${item.noRM}\n`;
       output += `${item.nama}\n`;
       output += `${item.noPelayanan}\n`;
-      output += `http://apps.rsudntb.id/radiologi/order/${item.noPelayanan}/detail\n\n`;
+      output += `http://apps.rsudntb.id/radiologi/order/${item.noPelayanan}/detail\n`;
+
+      // Tambahkan konten detail dalam tanda kutip
+      if (item.detailContent) {
+        output += `"${item.detailContent}"\n`;
+      } else {
+        output += `"Tidak ada data detail"\n`;
+      }
+
+      output += "\n";
     });
 
     // Download hasil
@@ -192,7 +283,10 @@ document.addEventListener("DOMContentLoaded", function () {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    showStatus(`Berhasil mengekstrak ${data.length} data!`, "success");
+    showStatus(
+      `Berhasil mengekstrak ${data.length} data dengan detail!`,
+      "success"
+    );
   }
 
   // Fungsi untuk menampilkan status
@@ -290,5 +384,23 @@ function getPageData() {
   } catch (error) {
     console.error("Error pada fungsi getPageData:", error);
     return [];
+  }
+}
+
+// Fungsi untuk mengambil konten detail pasien
+function getDetailContent() {
+  try {
+    // Cari elemen dengan class 'note-editable card-block'
+    const detailElement = document.querySelector(".note-editable.card-block");
+
+    if (detailElement) {
+      // Ambil dan bersihkan text content
+      return detailElement.textContent.trim();
+    }
+
+    return "Konten detail tidak ditemukan";
+  } catch (error) {
+    console.error("Error pada fungsi getDetailContent:", error);
+    return "Error saat mengambil konten detail";
   }
 }
