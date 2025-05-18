@@ -1,43 +1,92 @@
 document.addEventListener("DOMContentLoaded", function () {
+  // Reference to the scrape button
+  const scrapeButton = document.getElementById("scrapeButton");
+
+  // Variable to track extraction status
+  let isExtracting = false;
+
   // Set tanggal hari ini sebagai default
   const today = new Date();
   const formattedDate = today.toISOString().split("T")[0];
   document.getElementById("tanggal").value = formattedDate;
 
-  document
-    .getElementById("scrapeButton")
-    .addEventListener("click", function () {
-      const tanggal = document.getElementById("tanggal").value;
-      if (!tanggal) {
-        showStatus("Silakan pilih tanggal terlebih dahulu!", "error");
-        return;
+  scrapeButton.addEventListener("click", function () {
+    // If currently extracting, cancel the operation
+    if (isExtracting) {
+      isExtracting = false;
+      resetButtonAndStatus();
+      showStatus("Ekstraksi data dibatalkan.", "info");
+      return;
+    }
+
+    const tanggal = document.getElementById("tanggal").value;
+    if (!tanggal) {
+      showStatus("Silakan pilih tanggal terlebih dahulu!", "error");
+      return;
+    }
+
+    // Set extraction state to true
+    isExtracting = true;
+
+    // Change button text to "Cancel"
+    scrapeButton.textContent = "Cancel";
+    scrapeButton.classList.add("cancel-button");
+
+    // Show warning to user
+    showStatus(
+      "PERINGATAN: Jangan refresh halaman atau ubah tab aktif selama ekstraksi data berlangsung!",
+      "warning"
+    );
+
+    setTimeout(() => {
+      if (isExtracting) {
+        showStatus("Memproses... Mohon tunggu", "info");
+        const baseUrl = `http://apps.rsudntb.id/radiologi/pasien?jenis_cari=norm&katakunci=&ruanganAsal=0&status=0&dpjp=0&expertise=0&daterange=${tanggal}+-+${tanggal}&filter=true`;
+
+        chrome.tabs.query(
+          { active: true, currentWindow: true },
+          function (tabs) {
+            const currentTabId = tabs[0].id;
+
+            // Selalu redirect ke halaman dengan tanggal yang benar terlebih dahulu
+            chrome.tabs.update(currentTabId, { url: baseUrl }, function () {
+              chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+                if (tabId === currentTabId && info.status === "complete") {
+                  chrome.tabs.onUpdated.removeListener(listener);
+
+                  // Mulai proses scraping setelah halaman pertama dimuat
+                  setTimeout(function () {
+                    // Check if extraction was cancelled
+                    if (!isExtracting) {
+                      return;
+                    }
+                    // Kumpulkan data dari semua halaman
+                    collectAllPagesData(currentTabId, tanggal, baseUrl);
+                  }, 2000);
+                }
+              });
+            });
+          }
+        );
       }
+    }, 1500);
+  });
 
-      showStatus("Memproses... Mohon tunggu", "info");
-      const baseUrl = `http://apps.rsudntb.id/radiologi/pasien?jenis_cari=norm&katakunci=&ruanganAsal=0&status=0&dpjp=0&expertise=0&daterange=${tanggal}+-+${tanggal}&filter=true`;
-
-      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        const currentTabId = tabs[0].id;
-
-        // Selalu redirect ke halaman dengan tanggal yang benar terlebih dahulu
-        chrome.tabs.update(currentTabId, { url: baseUrl }, function () {
-          chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-            if (tabId === currentTabId && info.status === "complete") {
-              chrome.tabs.onUpdated.removeListener(listener);
-
-              // Mulai proses scraping setelah halaman pertama dimuat
-              setTimeout(function () {
-                // Kumpulkan data dari semua halaman
-                collectAllPagesData(currentTabId, tanggal, baseUrl);
-              }, 2000);
-            }
-          });
-        });
-      });
-    });
+  // Function to reset button and status
+  function resetButtonAndStatus() {
+    scrapeButton.textContent = "Ekstrak Data";
+    scrapeButton.classList.remove("cancel-button");
+    isExtracting = false;
+  }
 
   // Fungsi untuk mengumpulkan data dari semua halaman
   function collectAllPagesData(tabId, tanggal, baseUrl) {
+    // Check if extraction was cancelled
+    if (!isExtracting) {
+      resetButtonAndStatus();
+      return;
+    }
+
     // Jalankan script untuk mendeteksi jumlah halaman dan mengambil data halaman pertama
     chrome.scripting.executeScript(
       {
@@ -45,8 +94,15 @@ document.addEventListener("DOMContentLoaded", function () {
         function: getFirstPageAndPaginationInfo,
       },
       function (results) {
+        // Check if extraction was cancelled
+        if (!isExtracting) {
+          resetButtonAndStatus();
+          return;
+        }
+
         if (chrome.runtime.lastError) {
           showStatus("Error: " + chrome.runtime.lastError.message, "error");
+          resetButtonAndStatus();
           return;
         }
 
@@ -55,6 +111,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
           if (!pageInfo.success) {
             showStatus(pageInfo.message, "error");
+            resetButtonAndStatus();
             return;
           }
 
@@ -74,11 +131,22 @@ document.addEventListener("DOMContentLoaded", function () {
 
           // Fungsi untuk mengumpulkan data dari halaman berikutnya secara rekursif
           function getNextPageData(currentPage) {
+            // Check if extraction was cancelled
+            if (!isExtracting) {
+              resetButtonAndStatus();
+              return;
+            }
+
             // Jika sudah semua halaman diproses, format dan download hasilnya
             if (currentPage > pageInfo.totalPages) {
               // Kembali ke halaman awal dan proses detail
               chrome.tabs.update(tabId, { url: baseUrl }, function () {
                 setTimeout(() => {
+                  // Check if extraction was cancelled
+                  if (!isExtracting) {
+                    resetButtonAndStatus();
+                    return;
+                  }
                   processDetailPages(allData, tabId, tanggal);
                 }, 1000);
               });
@@ -96,6 +164,12 @@ document.addEventListener("DOMContentLoaded", function () {
             chrome.tabs.update(tabId, { url: nextPageUrl }, function () {
               // Tunggu sampai halaman dimuat
               function checkUrlLoaded() {
+                // Check if extraction was cancelled
+                if (!isExtracting) {
+                  resetButtonAndStatus();
+                  return;
+                }
+
                 chrome.tabs.get(tabId, function (tab) {
                   // Cek apakah halaman sudah dimuat dengan URL yang benar
                   if (
@@ -104,12 +178,24 @@ document.addEventListener("DOMContentLoaded", function () {
                   ) {
                     // Halaman sudah dimuat, ambil datanya
                     setTimeout(() => {
+                      // Check if extraction was cancelled
+                      if (!isExtracting) {
+                        resetButtonAndStatus();
+                        return;
+                      }
+
                       chrome.scripting.executeScript(
                         {
                           target: { tabId: tabId },
                           function: getPageData,
                         },
                         function (pageResults) {
+                          // Check if extraction was cancelled
+                          if (!isExtracting) {
+                            resetButtonAndStatus();
+                            return;
+                          }
+
                           if (
                             pageResults &&
                             pageResults[0] &&
@@ -150,6 +236,7 @@ document.addEventListener("DOMContentLoaded", function () {
           getNextPageData(2);
         } else {
           showStatus("Gagal memuat data halaman pertama", "error");
+          resetButtonAndStatus();
         }
       }
     );
@@ -157,11 +244,18 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Fungsi untuk memproses halaman detail setiap pasien
   function processDetailPages(data, tabId, tanggal) {
+    // Check if extraction was cancelled
+    if (!isExtracting) {
+      resetButtonAndStatus();
+      return;
+    }
+
     if (!data || data.length === 0) {
       showStatus(
         'Tidak ditemukan data dengan tujuan "Radiologi IGD Terpadu"',
         "error"
       );
+      resetButtonAndStatus();
       return;
     }
 
@@ -178,9 +272,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Fungsi untuk meproses detail pasien secara rekursif
     function processNextDetail(index) {
+      // Check if extraction was cancelled
+      if (!isExtracting) {
+        resetButtonAndStatus();
+        return;
+      }
+
       if (index >= data.length) {
         // Selesai memproses semua detail
         formatAndDownloadData(data, tanggal);
+        resetButtonAndStatus();
         return;
       }
 
@@ -197,16 +298,34 @@ document.addEventListener("DOMContentLoaded", function () {
       chrome.tabs.update(tabId, { url: detailUrl }, function () {
         // Tunggu sampai halaman detail dimuat
         function checkDetailLoaded() {
+          // Check if extraction was cancelled
+          if (!isExtracting) {
+            resetButtonAndStatus();
+            return;
+          }
+
           chrome.tabs.get(tabId, function (tab) {
             if (tab.status === "complete" && tab.url.includes(`/detail`)) {
               // Halaman sudah dimuat, ambil konten
               setTimeout(() => {
+                // Check if extraction was cancelled
+                if (!isExtracting) {
+                  resetButtonAndStatus();
+                  return;
+                }
+
                 chrome.scripting.executeScript(
                   {
                     target: { tabId: tabId },
                     function: getDetailContent,
                   },
                   function (detailResults) {
+                    // Check if extraction was cancelled
+                    if (!isExtracting) {
+                      resetButtonAndStatus();
+                      return;
+                    }
+
                     if (
                       detailResults &&
                       detailResults[0] &&
@@ -316,6 +435,9 @@ document.addEventListener("DOMContentLoaded", function () {
     } else if (type === "success") {
       statusElement.style.backgroundColor = "#d4edda";
       statusElement.style.color = "#155724";
+    } else if (type === "warning") {
+      statusElement.style.backgroundColor = "#fff3cd";
+      statusElement.style.color = "#856404";
     } else {
       statusElement.style.backgroundColor = "#f8f9fa";
       statusElement.style.color = "#000";
